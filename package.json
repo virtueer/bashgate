@@ -1,0 +1,12 @@
+{
+  "name": "virtuex",
+  "version": "1.0.0",
+  "description": "Bash command editor extension for pi coding agent",
+  "main": ".pi/extensions/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["pi", "extension", "bash", "security"],
+  "author": "virtueer",
+  "license": "MIT"
+}
