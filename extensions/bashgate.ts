@@ -430,7 +430,7 @@ export default function (pi: ExtensionAPI) {
         content: lines.join("\n"),
         display: true,
       },
-      { deliverAs: "followUp" }
+      { deliverAs: "steer" }
     );
 
     overrideData.delete(event.toolCallId);
