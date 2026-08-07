@@ -2,11 +2,7 @@
   "name": "bashgate",
   "version": "1.0.0",
   "description": "Bash command gatekeeper extension for pi coding agent",
-  "main": ".pi/bashgate/index.ts",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "main": "index.ts",
   "keywords": ["pi", "extension", "bash", "security"],
-  "author": "virtueer",
   "license": "MIT"
 }

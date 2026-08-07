@@ -1,23 +1,23 @@
 /**
- * Virtuex - Bash Command Editor Extension
+ * Bashgate - Bash Command Gatekeeper Extension
  *
- * Plays a bell sound on every bash command.
+ * Plays bell sound and shows notifications on every bash command and when LLM response ends.
  * Checks each split part for safety. Unsafe parts trigger approval.
  * Opens a single editor to edit the command and add an LLM note.
  *
  * Usage:
- *   pi -e .pi/extensions/virtuex.ts
+ *   pi -e .pi/bashgate/bashgate.ts
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 const extDir = __dirname;
-const globalConfigPath = resolve(extDir, "virtuex-config.json");
-const localSafePath = resolve(process.cwd(), ".pi", "extensions", "virtuex-local.jsonl");
+const globalConfigPath = resolve(extDir, "bashgate-config.json");
+const localSafePath = resolve(process.cwd(), ".pi", "bashgate", "bashgate-local.jsonl");
 
 // ── Load global config ─────────────────────────────────────────────────────
 let config: { safeCommands: string[]; safePatterns: string[]; unsafePatterns: string[] };
@@ -51,6 +51,12 @@ function checkPartSafe(part: string): { safe: boolean; reason?: string } {
     if (re.test(trimmed)) {
       return { safe: false, reason: `matched unsafe pattern: ${re.source}` };
     }
+  }
+
+  // Check safe commands list (exact first-word match)
+  const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+  for (const cmd of config.safeCommands) {
+    if (firstWord === cmd.toLowerCase()) return { safe: true };
   }
 
   // Check local safe list (literal substring match)
@@ -214,11 +220,20 @@ function formatCommandForEditor(cmd: string): string {
 export default function (pi: ExtensionAPI) {
   const overrideData = new Map<string, { originalCommand: string; newCommand?: string; note?: string }>();
 
-  // Bell sound on every bash command
+  // Bell + notify on every bash command
   pi.on("tool_call", async (event, ctx) => {
     if (!isToolCallEventType("bash", event)) return;
     if (!ctx.hasUI) return;
     playBell();
+    ctx.ui.setStatus("bashgate", "⚙️  Running: " + truncate(event.input.command, 40));
+  });
+
+  // Bell + notify when LLM response ends
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!ctx.hasUI) return;
+    playBell();
+    ctx.ui.setStatus("bashgate", "✅ Done");
+    setTimeout(() => ctx.ui.setStatus("bashgate", ""), 3000);
   });
 
   // Editor hook — edit command + add LLM note
