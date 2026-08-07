@@ -264,7 +264,7 @@ export default function (pi: ExtensionAPI) {
         // Open editor to write a note for the LLM
         const editorText = await ctx.ui.editor(
           "Write note to LLM",
-          `# Note for LLM: e.g. "Do not use npm, use pip instead"`,
+          "",
         );
         if (!editorText) {
           return { block: true, reason: "Editor cancelled" };
@@ -370,7 +370,7 @@ export default function (pi: ExtensionAPI) {
         // Open editor to write a note for the LLM
         const editorText = await ctx.ui.editor(
           `Write note to LLM (block ${toolName})`,
-          `# Note for LLM: e.g. "Do not write files outside the project directory"`,
+          "",
         );
         if (!editorText) {
           return { block: true, reason: "Editor cancelled" };
