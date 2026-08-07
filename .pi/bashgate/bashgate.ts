@@ -225,7 +225,7 @@ export default function (pi: ExtensionAPI) {
     if (!isToolCallEventType("bash", event)) return;
     if (!ctx.hasUI) return;
     playBell();
-    ctx.ui.setStatus("bashgate", "⚙️  Running: " + truncate(event.input.command, 40));
+    ctx.ui.setStatus("bashgate", "⚙  Running: " + truncate(event.input.command, 40));
   });
 
   // Bell + notify when LLM response ends
@@ -262,7 +262,7 @@ export default function (pi: ExtensionAPI) {
     // Unsafe parts found — show approval dialog
     try {
       const unsafeList = unsafeParts.map((u, i) => `${i + 1}. \`${truncate(u.part, 60)}\` — ${u.reason}`).join("\n");
-      const dialogMsg = `🔒 Unsafe command detected\n\n⚠️ ${unsafeParts.length} unsafe part(s):\n${unsafeList}\n\nCommand: \`${truncate(command, 100)}\``;
+      const dialogMsg = `🔒 Unsafe command detected\n\n⚠  ${unsafeParts.length} unsafe part(s):\n${unsafeList}\n\nCommand: \`${truncate(command, 100)}\``;
 
       const choice = await ctx.ui.select(
         dialogMsg,
