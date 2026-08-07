@@ -287,7 +287,7 @@ export default function (pi: ExtensionAPI) {
             content: `🚫 **Command blocked by user**\n\nThe following command was rejected:\n\n\`${truncate(command, 120)}\`\n\nBlocked parts:\n${blockedParts}${note ? "\n\n**Note:** " + note : ""}\n\nDo not attempt this command again. Find an alternative approach.`,
             display: true,
           },
-          { deliverAs: "followUp" }
+          { deliverAs: "steer" }
         );
         return { block: true, reason: "Unsafe command blocked" };
       }
@@ -392,7 +392,7 @@ export default function (pi: ExtensionAPI) {
             content: `🚫 **${actionLabel} blocked by user**\n\nPath: \`${path}\`\n\n**Reason:** ${reason}${note ? "\n\n**Note:** " + note : ""}\n\nDo not attempt to ${toolName} files outside the project directory.`,
             display: true,
           },
-          { deliverAs: "followUp" }
+          { deliverAs: "steer" }
         );
         return { block: true, reason: "Path outside CWD blocked" };
       }
