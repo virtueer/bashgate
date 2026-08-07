@@ -1,12 +1,14 @@
 {
-  "name": "bashgate",
+  "name": "@virtueer/bashgate",
   "version": "1.0.0",
   "description": "Bash command gatekeeper extension for pi coding agent",
-  "main": ".pi/bashgate/index.ts",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"]
   },
-  "keywords": ["pi", "extension", "bash", "security"],
-  "author": "virtueer",
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
   "license": "MIT"
 }
