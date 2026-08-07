@@ -1,9 +1,10 @@
 /**
- * Bashgate - Bash Command Gatekeeper Extension
+ * Bashgate - Bash Command Gatekeeper + Path Protection Extension
  *
  * Plays bell sound and shows notifications on every bash command and when LLM response ends.
  * Checks each split part for safety. Unsafe parts trigger approval.
  * Opens a single editor to edit the command and add an LLM note.
+ * Gates edit/write tool calls to paths outside the session CWD.
  *
  * Usage:
  *   pi -e .pi/bashgate/bashgate.ts
@@ -12,7 +13,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, isAbsolute, relative } from "node:path";
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 const extDir = __dirname;
@@ -72,8 +73,8 @@ function checkPartSafe(part: string): { safe: boolean; reason?: string } {
   return { safe: false, reason: `not in safe commands list` };
 }
 
-// ── Split for safety checking (&&, ||, ; only — keeps pipelines together) ─
-function splitSafetyParts(cmd: string): string[] {
+// ── Split command on operators (&&, ||, ;, |) respecting quotes ────────────
+function splitCommand(cmd: string): string[] {
   const parts: string[] = [];
   let current = "";
   let inSingleQuote = false;
@@ -105,60 +106,8 @@ function splitSafetyParts(cmd: string): string[] {
       continue;
     }
 
-    // Only split on &&, ||, ; — NOT on |
-    if (ch === ';' || (ch === '&' && cmd[i + 1] === '&') || (ch === '|' && cmd[i + 1] === '|')) {
-      const part = current.trim();
-      if (part) parts.push(part);
-      current = "";
-      if (ch === '&') i += 2;
-      else if (ch === '|') i += 2;
-      else i++;
-      continue;
-    }
-
-    current += ch;
-    i++;
-  }
-
-  const last = current.trim();
-  if (last) parts.push(last);
-  return parts;
-}
-
-// ── Split command into logical parts (&&, ||, ;, |) respecting quotes ──────
-function splitCommandParts(cmd: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let i = 0;
-
-  while (i < cmd.length) {
-    const ch = cmd[i];
-
-    if (inSingleQuote) {
-      if (ch === "'") inSingleQuote = false;
-      current += ch;
-      i++;
-      continue;
-    }
-    if (inDoubleQuote) {
-      if (ch === '"') inDoubleQuote = false;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    if (ch === "'") { inSingleQuote = true; current += ch; i++; continue; }
-    if (ch === '"') { inDoubleQuote = true; current += ch; i++; continue; }
-    if (ch === '#') {
-      current += ch;
-      i++;
-      while (i < cmd.length && cmd[i] !== '\n') { current += cmd[i]; i++; }
-      continue;
-    }
-
-    if (ch === ';' || (ch === '&' && cmd[i + 1] === '&') || (ch === '|') || (ch === '|' && cmd[i + 1] === '|')) {
+    // Split on &&, ||, ;, |
+    if (ch === ';' || ch === '&' || ch === '|') {
       const part = current.trim();
       if (part) parts.push(part);
       current = "";
@@ -176,6 +125,12 @@ function splitCommandParts(cmd: string): string[] {
   if (last) parts.push(last);
   return parts;
 }
+
+/** Split a command for safety checking (every part validated independently). */
+const splitSafetyParts = splitCommand;
+
+/** Split a command for editing (preserves operator positions). */
+const splitCommandParts = splitCommand;
 
 // ── Rejoin parts with their operators ──────────────────────────────────────
 function joinCommandParts(parts: string[], original: string): string {
@@ -216,6 +171,37 @@ function formatCommandForEditor(cmd: string): string {
   return lines.join("\n");
 }
 
+// ── Path protection ────────────────────────────────────────────────────────
+/** Expand ~ to home directory (Node doesn't do this automatically). */
+function expandTilde(path: string): string {
+  if (path.startsWith("~/") || path === "~") {
+    return resolve(process.env.HOME || "/root", path.slice(1));
+  }
+  return path;
+}
+
+/** Check if a target path is outside the session CWD. */
+function isPathOutsideCwd(targetPath: string, cwd: string): boolean {
+  const expanded = expandTilde(targetPath);
+  const absTarget = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  const absCwd = resolve(cwd);
+  const rel = relative(absCwd, absTarget);
+  // If relative path starts with "..", it's outside CWD
+  return rel.startsWith("..");
+}
+
+/** Get a human-readable description of why a path is outside CWD. */
+function getPathReason(targetPath: string, cwd: string): string {
+  const expanded = expandTilde(targetPath);
+  const absTarget = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  const absCwd = resolve(cwd);
+  const rel = relative(absCwd, absTarget);
+  if (rel.startsWith("..")) {
+    return `resolves to ${rel} (outside CWD ${cwd})`;
+  }
+  return `"${targetPath}"`;
+}
+
 // ── Main extension ─────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
   const overrideData = new Map<string, { originalCommand: string; newCommand?: string; note?: string }>();
@@ -236,13 +222,12 @@ export default function (pi: ExtensionAPI) {
     setTimeout(() => ctx.ui.setStatus("bashgate", ""), 3000);
   });
 
-  // Editor hook — edit command + add LLM note
+  // Safety gate — check every bash command
   pi.on("tool_call", async (event, ctx) => {
     if (!isToolCallEventType("bash", event)) return;
 
     const command = event.input.command;
     if (!command) return;
-    if (!ctx.hasUI) return;
 
     // Check each part for safety (keep pipelines together)
     const parts = splitSafetyParts(command);
@@ -259,6 +244,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    // No UI available — block silently (no bypass)
+    if (!ctx.hasUI) {
+      return { block: true, reason: "Unsafe command blocked (no UI for approval)" };
+    }
+
     // Unsafe parts found — show approval dialog
     try {
       const unsafeList = unsafeParts.map((u, i) => `${i + 1}. \`${truncate(u.part, 60)}\` — ${u.reason}`).join("\n");
@@ -271,6 +261,34 @@ export default function (pi: ExtensionAPI) {
       );
 
       if (!choice || choice === "✗  Block") {
+        // Open editor to write a note for the LLM
+        const editorText = await ctx.ui.editor(
+          "Write note to LLM",
+          `# Note for LLM: e.g. "Do not use npm, use pip instead"`,
+        );
+        if (!editorText) {
+          return { block: true, reason: "Editor cancelled" };
+        }
+
+        const noteMarker = "# Note for LLM:";
+        const noteIdx = editorText.indexOf(noteMarker);
+        let note: string;
+        if (noteIdx >= 0) {
+          const notePart = editorText.slice(noteIdx + noteMarker.length).trim();
+          note = notePart.replace(/^#\s*/, "");
+        } else {
+          note = editorText.trim();
+        }
+
+        const blockedParts = unsafeParts.map((u) => `  - \`${truncate(u.part, 80)}\` — ${u.reason}`).join("\n");
+        pi.sendMessage(
+          {
+            customType: "bash-blocked",
+            content: `🚫 **Command blocked by user**\n\nThe following command was rejected:\n\n\`${truncate(command, 120)}\`\n\nBlocked parts:\n${blockedParts}${note ? "\n\n**Note:** " + note : ""}\n\nDo not attempt this command again. Find an alternative approach.`,
+            display: true,
+          },
+          { deliverAs: "followUp" }
+        );
         return { block: true, reason: "Unsafe command blocked" };
       }
     } catch (err) {
@@ -318,6 +336,71 @@ export default function (pi: ExtensionAPI) {
     }
 
     return;
+  });
+
+  // ── Path gate for edit/write ─────────────────────────────────────────────
+  pi.on("tool_call", async (event, ctx) => {
+    if (!isToolCallEventType("edit", event) && !isToolCallEventType("write", event)) return;
+
+    const toolName = event.toolName;
+    const path = event.input.path;
+    if (!path) return;
+
+    // Check if path is outside CWD
+    if (!isPathOutsideCwd(path, ctx.cwd)) {
+      return; // Inside CWD, allow silently
+    }
+
+    // No UI — block silently
+    if (!ctx.hasUI) {
+      return { block: true, reason: "Path outside CWD blocked (no UI for approval)" };
+    }
+
+    const reason = getPathReason(path, ctx.cwd);
+    const actionLabel = toolName === "edit" ? "Edit" : "Write";
+
+    try {
+      const choice = await ctx.ui.select(
+        `🔒 ${actionLabel} outside project\n\nPath: \`${path}\`\n\n⚠  ${reason}`,
+        ["✓  Allow", "✗  Block"],
+        { signal: ctx.signal }
+      );
+
+      if (!choice || choice === "✗  Block") {
+        // Open editor to write a note for the LLM
+        const editorText = await ctx.ui.editor(
+          `Write note to LLM (block ${toolName})`,
+          `# Note for LLM: e.g. "Do not write files outside the project directory"`,
+        );
+        if (!editorText) {
+          return { block: true, reason: "Editor cancelled" };
+        }
+
+        const noteMarker = "# Note for LLM:";
+        const noteIdx = editorText.indexOf(noteMarker);
+        let note: string;
+        if (noteIdx >= 0) {
+          const notePart = editorText.slice(noteIdx + noteMarker.length).trim();
+          note = notePart.replace(/^#\s*/, "");
+        } else {
+          note = editorText.trim();
+        }
+
+        pi.sendMessage(
+          {
+            customType: "path-blocked",
+            content: `🚫 **${actionLabel} blocked by user**\n\nPath: \`${path}\`\n\n**Reason:** ${reason}${note ? "\n\n**Note:** " + note : ""}\n\nDo not attempt to ${toolName} files outside the project directory.`,
+            display: true,
+          },
+          { deliverAs: "followUp" }
+        );
+        return { block: true, reason: "Path outside CWD blocked" };
+      }
+    } catch (err) {
+      return { block: true, reason: err instanceof Error ? err.message : "Approval error" };
+    }
+
+    return; // Approved
   });
 
   // After bash execution — notify LLM of overrides
